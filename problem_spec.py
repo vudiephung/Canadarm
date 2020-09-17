@@ -3,6 +3,15 @@ from robot_config import make_robot_config_from_ee1, make_robot_config_from_ee2
 from obstacle import Obstacle
 from angle import Angle
 
+"""
+int num_segments;
+float[] min_lengths;
+float[] max_lengths;
+RobotConfig initial;
+RobotConfig goal;
+[(float, float)] grapple_points;
+Obstacle[] obstacles;
+"""
 
 class ProblemSpec:
     """
