@@ -1,8 +1,11 @@
 import sys
+import random
 
+from tester import *
 from problem_spec import ProblemSpec
-from robot_config import write_robot_config_list_to_file
+from robot_config import *
 from tester import test_config_equality
+from visualiser import Visualiser
 
 """
 Template file for you to implement your solution to Assignment 2. Contains a class you can use to represent graph nodes,
@@ -108,14 +111,72 @@ def main(arglist):
     #
     #
 
+    def generate_sample():
+        initialConfig = spec.initial
+
+        initialAngles = initialConfig.ee1_angles
+        minKAngle = -2879
+        maxKAngle = 2879
+        anglesRand = [Angle(radians=0.001) * random.randint(minKAngle, maxKAngle) for angleObj in initialAngles]
+        # print([angle.in_degrees() for angle in anglesRand])
+
+        minKLength = 0
+        maxKLength = (spec.max_lengths[0] - spec.min_lengths[0]) / 0.001
+        maxKLength = float(f'{maxKLength:.3f}')
+        if not maxKLength == 0:
+            lengthsRand = [float(f'{length + random.randint(minKLength, maxKLength) * 1e-3:.3f}')
+                           for length in spec.min_lengths]
+        else:
+            lengthsRand = spec.min_lengths
+
+        randomIndexGrapplePoint = random.randint(0, len(spec.grapple_points) - 1)
+        grappleXRand, grappleYRand = spec.grapple_points[randomIndexGrapplePoint]
+
+        # check number of grapple
+        numGrapplePoints = spec.num_grapple_points
+        if numGrapplePoints == 1:
+            ee1_grappled = True if spec.initial.ee1_grappled else False
+            ee2_grappled = not ee1_grappled
+        else:
+            ee1_grappled = bool(random.getrandbits(1))
+            ee2_grappled = bool(random.getrandbits(1))
+
+        if ee1_grappled:
+            robotConfig = make_robot_config_from_ee1(grappleXRand, grappleYRand, anglesRand, lengthsRand,
+                                                     ee1_grappled=ee1_grappled, ee2_grappled=ee2_grappled)
+        else:
+            robotConfig = make_robot_config_from_ee2(grappleXRand, grappleYRand, anglesRand, lengthsRand,
+                                                     ee1_grappled=ee1_grappled, ee2_grappled=ee2_grappled)
+
+        if test_obstacle_collision(robotConfig, spec, spec.obstacles):
+            return robotConfig
+
+        return generate_sample()
+
+    def interpolate_path(RobotConfig1, RobotConfig2):
+        pass
+
+    def build_graph():
+        graph = set()
+        while True:
+            for i in range(20):
+                randomConfig = generate_sample()
+                if not test_obstacle_collision(randomConfig, spec, spec.obstacles):
+                    newNode = GraphNode(spec, randomConfig)
+                    graph.add(newNode)
+                    # Connect strategies
+            # Search graph
+            # if found: break
+
     if len(arglist) > 1:
+        generate_sample()
         write_robot_config_list_to_file(output_file, steps)
 
     #
     # You may uncomment this line to launch visualiser once a solution has been found. This may be useful for debugging.
     # *** Make sure this line is commented out when you submit to Gradescope ***
     #
-    #v = Visualiser(spec, steps)
+    # v = Visualiser(spec, steps)
 
 
 if __name__ == '__main__':
