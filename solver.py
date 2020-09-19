@@ -154,7 +154,105 @@ def main(arglist):
         return generate_sample()
 
     def interpolate_path(RobotConfig1, RobotConfig2):
-        pass
+        paths = [RobotConfig1]
+
+        lengths1 = RobotConfig1.lengths
+        lengths2 = RobotConfig2.lengths
+
+        kLengths = []
+        for i in range(len(lengths1)):
+            differences = lengths2[i] - lengths1[i]
+            if differences >= 0:
+                kLengths.append(math.floor(differences / 0.001))
+            else:
+                kLengths.append(math.ceil(differences / 0.001))
+
+        angles1 = RobotConfig1.ee1_angles
+        angles2 = RobotConfig2.ee1_angles
+
+        kAngles = []
+        for i in range(len(angles1)):
+            differences = angles2[i].radians - angles1[i].radians
+            if differences >= 0:
+                kAngles.append(math.floor(differences / 0.001))
+            else:
+                kAngles.append(math.ceil(differences / 0.001))
+
+        if RobotConfig1.ee1_grappled:
+            ee2Grappled = True if RobotConfig1.ee2_grappled else False
+            ee1Grappled = True
+            grappledX, grappledY = RobotConfig1.get_ee1()
+        else:
+            ee2Grappled = True
+            ee1Grappled = False
+            grappledX, grappledY = RobotConfig1.get_ee2()
+
+        #  for each config,
+        newLengths = []
+        newAngles = []
+        counter = 0
+        # getConfig2 = False
+        while True:
+            if counter < 2:
+                counter += 1
+            for i in range(len(lengths1)):
+                if kLengths[i] > 0:
+                    if counter == 1:
+                        newLengths.append(lengths1[i] + 0.001)
+                    else:
+                        newLengths[i] += 0.001
+                    kLengths[i] -= 1
+                elif kLengths[i] < 0:
+                    if counter == 1:
+                        newLengths.append(lengths1[i] - 0.001)
+                    else:
+                        newLengths[i] -= 0.001
+                    kLengths[i] += 1
+                else:
+                    if counter != 1:
+                        if lengths2[i] - newLengths[i] > 0:
+                            newLengths[i] += (lengths2[i] - newLengths[i])
+                        elif lengths2[i] - newLengths[i] < 0:
+                            newLengths[i] -= (lengths1[i] - lengths2[i])
+                    else:
+                        newLengths.append(lengths1[i])
+
+                if kAngles[i] > 0:
+                    if counter == 1:
+                        newAngles.append(angles1[i] + 0.001)
+                    else:
+                        newAngles[i] += 0.001
+                    kAngles[i] -= 1
+
+                    print(newAngles[i])
+                    print(angles2[i])
+                elif kAngles[i] < 0:
+                    if counter == 1:
+                        newAngles.append(angles1[i] - 0.001)
+                    else:
+                        newAngles[i] -= 0.001
+                    kAngles[i] += 1
+                else:
+                    if counter != 1:
+                        # if i == 0:
+                        #     print("This")
+                        if angles2[i] > newAngles[i]:
+                            newAngles[i] += (angles2[i] - newAngles[i])
+                        elif angles2[i] < newAngles[i]:
+                            newAngles[i] -= (newAngles[i] - angles2[i])
+                    else:
+                        newAngles.append(angles1[i])
+                if i == len(lengths1) - 1:
+                    newConfig = make_robot_config_from_ee1(x=grappledX, y=grappledY,
+                                                           angles=newAngles.copy(), lengths=newLengths.copy(),
+                                                           ee1_grappled=ee1Grappled, ee2_grappled=ee2Grappled)
+                    paths.append(newConfig)
+
+            if paths[-1]:
+                if test_config_equality(paths[-1], RobotConfig2, spec):
+                    break
+
+        return paths
 
     def build_graph():
         graph = set()
@@ -170,13 +268,14 @@ def main(arglist):
 
     if len(arglist) > 1:
         generate_sample()
+        steps = interpolate_path(spec.initial, spec.goal)
         write_robot_config_list_to_file(output_file, steps)
 
     #
     # You may uncomment this line to launch visualiser once a solution has been found. This may be useful for debugging.
     # *** Make sure this line is commented out when you submit to Gradescope ***
     #
-    # v = Visualiser(spec, steps)
+    v = Visualiser(spec, steps)
 
 
 if __name__ == '__main__':
