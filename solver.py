@@ -33,6 +33,7 @@ class GraphNode:
         self.spec = spec
         self.config = config
         self.neighbors = []
+        self.distanceToGoal = float('inf')
 
     def __eq__(self, other):
         return test_config_equality(self.config, other.config, self.spec)
@@ -110,6 +111,24 @@ def main(arglist):
     # state and the last configuration is the goal state.
     #
     #
+    def get_config_distance(c1, c2, spec):
+        max_ee1_delta = 0
+        max_ee2_delta = 0
+        for i in range(spec.num_segments):
+            if abs((c2.ee1_angles[i] - c1.ee1_angles[i]).in_radians()) > max_ee1_delta:
+                max_ee1_delta = abs((c2.ee1_angles[i] - c1.ee1_angles[i]).in_radians())
+
+            if abs((c2.ee2_angles[i] - c1.ee2_angles[i]).in_radians()) > max_ee2_delta:
+                max_ee2_delta = abs((c2.ee2_angles[i] - c1.ee2_angles[i]).in_radians())
+
+        # measure leniently - allow compliance from EE1 or EE2
+        max_delta = min(max_ee1_delta, max_ee2_delta)
+
+        for i in range(spec.num_segments):
+            if abs(c2.lengths[i] - c1.lengths[i]) > max_delta:
+                max_delta = abs(c2.lengths[i] - c1.lengths[i])
+
+        return max_delta
 
     def generate_sample():
         initialConfig = spec.initial
@@ -148,10 +167,13 @@ def main(arglist):
             robotConfig = make_robot_config_from_ee2(grappleXRand, grappleYRand, anglesRand, lengthsRand,
                                                      ee1_grappled=ee1_grappled, ee2_grappled=ee2_grappled)
 
-        if test_obstacle_collision(robotConfig, spec, spec.obstacles):
+        if test_obstacle_collision(robotConfig, spec, spec.obstacles) and test_self_collision(robotConfig, spec):
             return robotConfig
 
         return generate_sample()
+
+    def get_bridge_config(spec):
+        pass
 
     def interpolate_path(RobotConfig1, RobotConfig2):
         paths = [RobotConfig1]
@@ -254,21 +276,90 @@ def main(arglist):
 
         return paths
 
+    def check_path_collision(RobotConfig1, RobotConfig2):
+        """
+        return: true if pass, false otherwise
+        """
+        configList = interpolate_path(RobotConfig1, RobotConfig2)
+        for config in configList:
+            if not test_obstacle_collision(config, spec, spec.obstacles):
+                return False
+        return True
+
+    def connect_node(Node1, Node2):
+        if check_path_collision(Node1.config, Node2.config):
+            GraphNode.add_connection(Node1, Node2)
+
     def build_graph():
-        graph = set()
+        graph = []
+        paths = []
+        # graph.add(init_node)
+        # graph.add(goal_node)
+
+        minInitDistance = float('inf')
+        minGoalDistance = float('inf')
         while True:
-            for i in range(20):
+            numberOfSamples = 3
+            for i in range(numberOfSamples):
                 randomConfig = generate_sample()
-                if not test_obstacle_collision(randomConfig, spec, spec.obstacles):
-                    newNode = GraphNode(spec, randomConfig)
-                    graph.add(newNode)
-                    # Connect strategies
-            # Search graph
-            # if found: break
+
+                # initDistance = get_config_distance(init_node.config, randomConfig, spec)
+                # if initDistance < minInitDistance:
+                #     minInitDistance = initDistance
+                #     configNearInit = randomConfig
+                #
+                # goalDistance = get_config_distance(goal_node.config, randomConfig, spec)
+                # if goalDistance < minGoalDistance:
+                #     minGoalDistance = goalDistance
+                #     configNearGoal = randomConfig
+
+                newNode = GraphNode(spec, randomConfig)
+
+                if graph:
+                    for node in graph:
+                        # Should bias the node with low distance
+                        connect_node(newNode, node)
+                        # careful
+                    connect_node(newNode, goal_node)
+                    connect_node(newNode, init_node)
+                    graph.append(newNode)
+                else:
+                    graph.append(newNode)
+
+            # connect init and goal to the graph
+            # nodeNearInit = GraphNode(spec, configNearInit)
+            # nodeNearGoal = GraphNode(spec, configNearGoal)
+            # connect_node(init_node, nodeNearInit)
+            # connect_node(goal_node, nodeNearGoal)
+
+            initPaths = find_graph_path(spec, init_node)
+            # if initPaths:
+            #      return initPaths
+            # else:
+            #     continue
+
+            foundGoal = True
+            if initPaths:
+                for i in range(len(initPaths) - 1):
+                    if check_path_collision(initPaths[i], initPaths[i + 1]):
+                        paths += (interpolate_path(initPaths[i], initPaths[i + 1]))
+                    else:
+                        foundGoal = False
+                        paths = []
+                        break
+                if foundGoal:
+                    return paths
+            # else:
+            #     print("Init path is None")
 
     if len(arglist) > 1:
-        generate_sample()
-        steps = interpolate_path(spec.initial, spec.goal)
+        # counter = 0
+        # while counter < 1000:
+        #     counter += 1
+        #     print(counter)
+        #     config = generate_sample()
+        #     steps.append(config)
+        steps = build_graph()
         write_robot_config_list_to_file(output_file, steps)
 
     #
