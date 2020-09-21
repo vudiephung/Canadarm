@@ -130,23 +130,34 @@ def main(arglist):
 
         return max_delta
 
-    def generate_sample():
-        initialConfig = spec.initial
-
-        initialAngles = initialConfig.ee1_angles
+    def rand_angle():
         minKAngle = -2879
         maxKAngle = 2879
-        anglesRand = [Angle(radians=0.001) * random.randint(minKAngle, maxKAngle) for angleObj in initialAngles]
-        # print([angle.in_degrees() for angle in anglesRand])
+        anglesRand = Angle(radians=0.001) * random.randint(minKAngle, maxKAngle)
+        return anglesRand
 
+    def rand_length(spec, initLength):
         minKLength = 0
         maxKLength = (spec.max_lengths[0] - spec.min_lengths[0]) / 0.001
         maxKLength = float(f'{maxKLength:.3f}')
         if not maxKLength == 0:
-            lengthsRand = [float(f'{length + random.randint(minKLength, maxKLength) * 1e-3:.3f}')
-                           for length in spec.min_lengths]
+            return float(f'{initLength + random.randint(minKLength, maxKLength) * 1e-3:.3f}')
         else:
-            lengthsRand = spec.min_lengths
+            return initLength
+
+    def generate_sample():
+        initialConfig = spec.initial
+
+        # if spec.initial.ee1_grappled:
+        #     initialAngles = initialConfig.ee1_angles
+        # else:
+        #     initialAngles = initialConfig.ee2_angles
+        anglesRand = []
+        for i in range(spec.num_segments):
+            anglesRand.append(rand_angle())
+        # print([angle.in_degrees() for angle in anglesRand])
+
+        lengthsRand = [rand_length(spec, length) for length in spec.min_lengths]
 
         randomIndexGrapplePoint = random.randint(0, len(spec.grapple_points) - 1)
         grappleXRand, grappleYRand = spec.grapple_points[randomIndexGrapplePoint]
@@ -157,6 +168,7 @@ def main(arglist):
             ee1_grappled = True if spec.initial.ee1_grappled else False
             ee2_grappled = not ee1_grappled
         else:
+            # Careful
             ee1_grappled = bool(random.getrandbits(1))
             ee2_grappled = bool(random.getrandbits(1))
 
@@ -172,8 +184,96 @@ def main(arglist):
 
         return generate_sample()
 
-    def get_bridge_config(spec):
-        pass
+    def get_current_grapple_point(config):
+        if config.ee1_grappled:
+            return config.get_ee1()
+        return config.get_ee2()
+
+    def get_nearest_grapple_point(newConfig, lastX, lastY):
+        nearestGrappleDistance = float('inf')
+        nearestGrapplePoint = None
+        for grapplePoint in spec.grapple_points:
+            if grapplePoint == get_current_grapple_point(newConfig):
+                continue
+            grappleX, grappleY = grapplePoint
+            deltaX = abs(lastX - grappleX)
+            deltaY = abs(lastY - grappleY)
+            if deltaX + deltaY < nearestGrappleDistance:
+                nearestGrappleDistance = deltaX + deltaY
+                nearestGrapplePoint = grapplePoint
+                delta = (deltaX, deltaY)
+        return nearestGrapplePoint
+
+    def get_perpendicular_intersect(A, B, C):
+        x1, y1 = A
+        x2, y2 = B
+        x3, y3 = C
+        px = x2 - x1
+        py = y2 - y1
+        dAB = px * px + py * py
+        u = ((x3 - x1) * px + (y3 - y1) * py) / dAB
+        x = x1 + u * px
+        y = y1 + u * py;
+        return x, y
+
+    def get_bridge_config(ee1_grappled, ee2_grappled, grappledX, grappledY):
+        # randomly sample n-1 links
+        while True:
+            anglesRand = []
+            lengthsRand = []
+            for i in range(spec.num_segments - 1):
+                anglesRand.append(rand_angle())
+                lengthsRand.append(rand_length(spec, spec.min_lengths[i]))
+            # Connect last link to the endpoint
+            # Get coords of the second last joint
+            if ee1_grappled:
+                newConfig = make_robot_config_from_ee1(grappledX, grappledY, anglesRand, lengthsRand,
+                                                       ee1_grappled, ee2_grappled)
+            else:
+                newConfig = make_robot_config_from_ee2(grappledX, grappledY, anglesRand, lengthsRand,
+                                                       ee1_grappled, ee2_grappled)
+
+            # if not test_obstacle_collision(newConfig, spec, spec.obstacles) or not test_self_collision(newConfig, spec):
+            #     continue
+
+            lastX, lastY = newConfig.points[-1]
+
+            grapplePoint = get_nearest_grapple_point(newConfig, lastX, lastY)
+
+            # xD, yD = get_perpendicular_intersect(newConfig.points[-1], newConfig.points[-2], grapplePoint)
+            # deltaY = math.sqrt((grapplePoint[0] - xD)**2 + (grapplePoint[1] - yD)**2)
+            # deltaX = math.sqrt((grapplePoint[0] - lastX) ** 2 + (grapplePoint[1] - lastY) ** 2)
+
+            # angleLastLink = - Angle.atan(deltaY / deltaX)
+            # lengthLastLink = math.sqrt(deltaX**2 + deltaY**2)
+
+            gX, gY = grapplePoint
+            deltaY = gY - lastY
+            deltaX = gX - lastX
+            angleLastLink = Angle.atan2(deltaY, deltaX)
+            lengthLastLink = math.sqrt(deltaY**2 + deltaX**2)
+
+            if not ((-11 * math.pi / 12) - spec.TOLERANCE < angleLastLink < (11 * math.pi / 12) + spec.TOLERANCE) \
+                    or lengthLastLink < spec.min_lengths[-1] - spec.TOLERANCE \
+                    or lengthLastLink > spec.max_lengths[-1] + spec.TOLERANCE:
+                continue
+
+            anglesRand.append(angleLastLink)
+            lengthsRand.append(lengthLastLink)
+
+            if ee1_grappled:
+                finalConfig = make_robot_config_from_ee1(grappledX, grappledY, anglesRand, lengthsRand,
+                                                         ee1_grappled=ee1_grappled, ee2_grappled=True)
+            else:
+                finalConfig = make_robot_config_from_ee2(grappledX, grappledY, anglesRand, lengthsRand,
+                                                         ee1_grappled=True, ee2_grappled=ee2_grappled)
+
+            gX, gY = finalConfig.points[-1]
+            grappledX, grappledY = grapplePoint
+            if not point_is_close(gX, gY, grappledX, grappledY, spec.TOLERANCE):
+                continue
+            if test_obstacle_collision(finalConfig, spec, spec.obstacles) and test_self_collision(finalConfig, spec):
+                return finalConfig
 
     def interpolate_path(RobotConfig1, RobotConfig2):
         paths = [RobotConfig1]
@@ -299,7 +399,7 @@ def main(arglist):
         minInitDistance = float('inf')
         minGoalDistance = float('inf')
         while True:
-            numberOfSamples = 3
+            numberOfSamples = 10
             for i in range(numberOfSamples):
                 randomConfig = generate_sample()
 
@@ -349,17 +449,21 @@ def main(arglist):
                         break
                 if foundGoal:
                     return paths
-            # else:
-            #     print("Init path is None")
 
     if len(arglist) > 1:
-        # counter = 0
-        # while counter < 1000:
-        #     counter += 1
-        #     print(counter)
-        #     config = generate_sample()
-        #     steps.append(config)
-        steps = build_graph()
+        counter = 0
+        while counter < 10:
+            counter += 1
+            print(counter)
+            grappleX, grappleY = spec.initial.get_ee1()
+            config = get_bridge_config(spec.initial.ee1_grappled, spec.initial.ee2_grappled, grappleX, grappleY)
+            steps.append(config)
+
+        # steps = build_graph()
+        # grappleX, grappleY = spec.initial.get_ee1()
+        # steps = get_bridge_config(spec.initial.ee1_grappled, spec.initial.ee2_grappled, grappleX, grappleY)
+        # print("Bridge", bridge)
+        # steps = interpolate_path(spec.initial, )
         write_robot_config_list_to_file(output_file, steps)
 
     #
